@@ -1,5 +1,6 @@
 import { createApp } from '@/app';
 import { config } from '@/config';
+import { cache } from '@/lib/cache';
 import { logger } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 
@@ -35,7 +36,7 @@ async function bootstrap(): Promise<void> {
     }, SHUTDOWN_TIMEOUT_MS).unref();
 
     server.close((error) => {
-      void prisma.$disconnect().finally(() => {
+      void Promise.allSettled([prisma.$disconnect(), cache.disconnect()]).finally(() => {
         logger.info('Shutdown complete');
         process.exit(error ? 1 : 0);
       });
