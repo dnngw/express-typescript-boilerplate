@@ -15,6 +15,7 @@ export const authContextService = new AuthContextService(
 export const authenticate = createAuthenticate(authContextService);
 
 export { getAuthUser } from './authenticate';
+export { assertHoldsPermissions, authorize, hasPermission } from './authorize';
 export { signAccessToken } from './access-token';
 export type { AuthContextService } from './auth-context.service';
 export type { AuthContext, AuthUser } from './auth.types';
