@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import type { Request, Response } from 'express';
 import { pinoHttp } from 'pino-http';
 
 import { logger } from '@/lib/logger';
@@ -12,7 +13,7 @@ const VALID_REQUEST_ID = /^[\w-]{1,128}$/;
  * The request id is taken from the incoming `X-Request-Id` header (so it can be traced across
  * services) or generated, and is echoed back in the response header.
  */
-export const httpLogger = pinoHttp({
+export const httpLogger = pinoHttp<Request, Response>({
   logger,
   genReqId(req, res) {
     const incoming = req.headers[REQUEST_ID_HEADER];
@@ -26,11 +27,12 @@ export const httpLogger = pinoHttp({
     if (res.statusCode >= 400) return 'warn';
     return 'info';
   },
+  // `originalUrl`, because Express rewrites `req.url` inside nested routers.
   customSuccessMessage(req, res, responseTime) {
-    return `${req.method ?? ''} ${req.url ?? ''} ${res.statusCode} - ${Math.round(responseTime)}ms`;
+    return `${req.method} ${req.originalUrl} ${res.statusCode} - ${Math.round(responseTime)}ms`;
   },
   customErrorMessage(req, res) {
-    return `${req.method ?? ''} ${req.url ?? ''} ${res.statusCode} - failed`;
+    return `${req.method} ${req.originalUrl} ${res.statusCode} - failed`;
   },
   serializers: {
     req: (req: { id: string; method: string; url: string; remoteAddress?: string }) => ({
@@ -43,6 +45,6 @@ export const httpLogger = pinoHttp({
   },
   autoLogging: {
     // Health checks are polled every few seconds by orchestrators — don't flood the logs.
-    ignore: (req) => req.url?.startsWith('/health') ?? false,
+    ignore: (req) => req.originalUrl.startsWith('/health'),
   },
 });
