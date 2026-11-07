@@ -1,0 +1,78 @@
+# Full local stack: PostgreSQL + Redis + migrations/seed + API.
+#
+#   docker compose up --build
+#
+# Variables like ${JWT_ACCESS_SECRET} are read from your shell or the `.env` file.
+
+name: express-boilerplate
+
+x-app-env: &app-env
+  NODE_ENV: production
+  LOG_LEVEL: info
+  DATABASE_URL: postgresql://postgres:postgres@postgres:5432/boilerplate
+  REDIS_URL: redis://redis:6379
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in .env}
+  CORS_ORIGINS: ${CORS_ORIGINS:-*}
+  API_DOCS_ENABLED: ${API_DOCS_ENABLED:-true}
+  RBAC_ALLOW_MULTIPLE_ROLES: ${RBAC_ALLOW_MULTIPLE_ROLES:-true}
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: boilerplate
+    ports:
+      - '${POSTGRES_HOST_PORT:-5432}:5432'
+    volumes:
+      # PostgreSQL 18+ images store data under /var/lib/postgresql/<version>.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d boilerplate']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - '${REDIS_HOST_PORT:-6379}:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-off job: applies migrations and seeds roles/permissions + the super admin.
+  migrate:
+    build:
+      context: .
+      target: build
+    command: sh -c "npx prisma migrate deploy && npx prisma db seed"
+    environment:
+      <<: *app-env
+      SEED_SUPER_ADMIN_EMAIL: ${SEED_SUPER_ADMIN_EMAIL:-superadmin@example.com}
+      SEED_SUPER_ADMIN_PASSWORD: ${SEED_SUPER_ADMIN_PASSWORD:-ChangeMe123!}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    build:
+      context: .
+      target: runner
+    ports:
+      - '${PORT:-3000}:3000'
+    environment:
+      <<: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

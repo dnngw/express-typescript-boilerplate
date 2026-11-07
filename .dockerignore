@@ -1,0 +1,17 @@
+# Keep the build context small and never send secrets to the Docker daemon.
+node_modules
+dist
+coverage
+src/generated
+.git
+.github
+.husky
+.vscode
+.idea
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Dockerfile
+docker-compose*.yml
