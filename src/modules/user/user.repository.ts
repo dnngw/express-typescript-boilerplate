@@ -19,6 +19,21 @@ export const userSelect = {
 export type UserRecord = Prisma.UserGetPayload<{ select: typeof userSelect }>;
 export type UserWithPassword = UserRecord & { passwordHash: string };
 
+export interface FindUsersParams {
+  skip: number;
+  take: number;
+  search?: string | undefined;
+  roleName?: string | undefined;
+  isActive?: boolean | undefined;
+  sortBy: 'createdAt' | 'name' | 'email';
+  sortOrder: 'asc' | 'desc';
+}
+
+export interface UpdateUserData {
+  name?: string | undefined;
+  isActive?: boolean | undefined;
+}
+
 export interface CreateUserData {
   name: string;
   email: string;
@@ -35,6 +50,34 @@ export class UserRepository {
 
   findById(id: string): Promise<UserRecord | null> {
     return this.prisma.user.findFirst({ where: { id, deletedAt: null }, select: userSelect });
+  }
+
+  async findMany(params: FindUsersParams): Promise<{ items: UserRecord[]; total: number }> {
+    const where: Prisma.UserWhereInput = {
+      deletedAt: null,
+      ...(params.search && {
+        OR: [
+          { name: { contains: params.search, mode: 'insensitive' } },
+          { email: { contains: params.search, mode: 'insensitive' } },
+        ],
+      }),
+      ...(params.roleName && { roles: { some: { role: { name: params.roleName } } } }),
+      ...(params.isActive !== undefined && { isActive: params.isActive }),
+    };
+
+    // Run both queries in one transaction so `total` matches `items`.
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.user.findMany({
+        where,
+        select: userSelect,
+        skip: params.skip,
+        take: params.take,
+        orderBy: [{ [params.sortBy]: params.sortOrder }, { id: 'asc' }],
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return { items, total };
   }
 
   /** Includes the password hash — only use it to verify credentials. */
@@ -62,6 +105,31 @@ export class UserRepository {
     return this.prisma.user.create({
       data: { ...data, roles: { create: roleIds.map((roleId) => ({ roleId })) } },
       select: userSelect,
+    });
+  }
+
+  update(id: string, data: UpdateUserData): Promise<UserRecord> {
+    return this.prisma.user.update({ where: { id }, data, select: userSelect });
+  }
+
+  /** Replaces every role of the user with the given ones. */
+  replaceRoles(id: string, roleIds: string[]): Promise<UserRecord> {
+    return this.prisma.user.update({
+      where: { id },
+      data: { roles: { deleteMany: {}, create: roleIds.map((roleId) => ({ roleId })) } },
+      select: userSelect,
+    });
+  }
+
+  /**
+   * Soft delete: the row is kept (audit trail, foreign keys) but hidden from every query.
+   * Bumping the token version kills existing access tokens; refresh tokens stop working
+   * because refreshing looks the user up by id, which now finds nothing.
+   */
+  async softDelete(id: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { id },
+      data: { deletedAt: new Date(), isActive: false, tokenVersion: { increment: 1 } },
     });
   }
 
